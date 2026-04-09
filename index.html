@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Карта</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { 
+      width: 100%; 
+      height: 100%; 
+      background: #000; 
+      overflow: hidden; 
+      font-family: system-ui, sans-serif;
+    }
+    .container {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    #zoomImageWrapper {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+      cursor: grab;
+    }
+    #zoomImageWrapper:active { cursor: grabbing; }
+    img {
+      position: absolute;
+      top: 0; left: 0;
+      width: auto; height: auto;
+      max-width: none; max-height: none;
+      transform-origin: 0 0;
+      will-change: transform;
+      user-select: none;
+      -webkit-user-drag: none;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="zoomImageWrapper">
+      <!-- 👇 УКАЖИ ПРЯМОЙ ПУТЬ К КАРТИНКЕ -->
+      <img src="unt_map.png" alt="Карта" decoding="async" loading="eager" draggable="false">
+    </div>
+  </div>
+
+  <script>
+   const wrapper = document.getElementById('zoomImageWrapper');
+const img = wrapper.querySelector('img');
+
+// Состояние
+let scale = 1;
+let targetScale = 1;
+let translateX = 0, translateY = 0;
+let isDragging = false;
+let startX, startY;
+
+// Параметры плавности зума
+let zoomOriginX = 0, zoomOriginY = 0;
+let animationId = null;
+const ZOOM_DAMPING = 0.18;      // 0.1 = очень плавно, 0.3 = резко. 0.18 ~ Google Maps
+const ZOOM_SENSITIVITY = 0.001; // Скорость изменения масштаба от колеса
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 5;
+
+function clamp(val, min, max) {
+  return val < min ? min : val > max ? max : val;
+}
+
+function getBounds() {
+  const wrapW = wrapper.clientWidth;
+  const wrapH = wrapper.clientHeight;
+  const imgW = img.naturalWidth * scale;
+  const imgH = img.naturalHeight * scale;
+
+  let minX, maxX, minY, maxY;
+  if (imgW >= wrapW) { minX = wrapW - imgW; maxX = 0; }
+  else { minX = maxX = (wrapW - imgW) / 2; }
+  
+  if (imgH >= wrapH) { minY = wrapH - imgH; maxY = 0; }
+  else { minY = maxY = (wrapH - imgH) / 2; }
+  
+  return { minX, maxX, minY, maxY };
+}
+
+function applyTransform() {
+  const { minX, maxX, minY, maxY } = getBounds();
+  translateX = clamp(translateX, minX, maxX);
+  translateY = clamp(translateY, minY, maxY);
+  img.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+}
+
+// 🎬 Анимационный цикл (requestAnimationFrame)
+function animateZoom() {
+  // Если цель достигнута с высокой точностью → останавливаем
+  if (Math.abs(targetScale - scale) < 0.001) {
+    scale = targetScale;
+    applyTransform();
+    animationId = null;
+    return;
+  }
+
+  const oldScale = scale;
+  // Экспоненциальное сглаживание (lerp)
+  scale += (targetScale - scale) * ZOOM_DAMPING;
+
+  // Сохраняем точку под курсором на месте при изменении масштаба
+  translateX = zoomOriginX - (zoomOriginX - translateX) * (scale / oldScale);
+  translateY = zoomOriginY - (zoomOriginY - translateY) * (scale / oldScale);
+
+  applyTransform();
+  animationId = requestAnimationFrame(animateZoom);
+}
+
+function startZoomAnimation() {
+  if (!animationId) {
+    animationId = requestAnimationFrame(animateZoom);
+  }
+}
+
+// 🖱️ Обработка колеса
+wrapper.addEventListener('wheel', (e) => {
+  e.preventDefault();
+
+  const rect = wrapper.getBoundingClientRect();
+  zoomOriginX = e.clientX - rect.left;
+  zoomOriginY = e.clientY - rect.top;
+
+  // Мультипликативное изменение (плавнее аддитивного)
+  targetScale = clamp(targetScale * (1 - e.deltaY * ZOOM_SENSITIVITY), MIN_SCALE, MAX_SCALE);
+  startZoomAnimation();
+}, { passive: false });
+
+// ✋ Перетаскивание
+wrapper.addEventListener('mousedown', (e) => {
+  if (e.button === 0) {
+    isDragging = true;
+    startX = e.clientX - translateX;
+    startY = e.clientY - translateY;
+    
+    // Отменяем анимацию зума, чтобы не конфликтовала с драгом
+    if (animationId) cancelAnimationFrame(animationId);
+    animationId = null;
+    img.style.transition = 'none';
+  }
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  e.preventDefault();
+  translateX = e.clientX - startX;
+  translateY = e.clientY - startY;
+  applyTransform();
+});
+
+document.addEventListener('mouseup', () => {
+  if (isDragging) {
+    isDragging = false;
+    img.style.transition = '';
+  }
+});
+
+wrapper.addEventListener('dragstart', e => e.preventDefault());
+
+// 🚀 Инициализация
+function init() { applyTransform(); }
+img.onload = init;
+if (img.complete) init();
+window.addEventListener('resize', init);
+  </script>
+</body>
+</html>
